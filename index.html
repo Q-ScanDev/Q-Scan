@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="id">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Presensi Siswa SMA Negeri Mojoagung</title>
+  <script src="/_sdk/data_sdk.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      box-sizing: border-box;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+    }
+    
+    .fade-in {
+      animation: fadeIn 0.3s ease-out;
+    }
+    
+    .slide-in {
+      animation: slideIn 0.4s ease-out;
+    }
+    
+    .card-hover {
+      transition: all 0.3s ease;
+    }
+    
+    .card-hover:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    }
+    
+    .btn-hover {
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .btn-hover:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+    }
+    
+    .btn-hover:active {
+      transform: translateY(0);
+    }
+    
+    .btn-hover::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+      transition: left 0.5s;
+    }
+    
+    .btn-hover:hover::before {
+      left: 100%;
+    }
+    
+    .toast {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 16px 24px;
+      border-radius: 12px;
+      color: white;
+      font-weight: 500;
+      z-index: 1000;
+      animation: fadeIn 0.3s ease-out;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    }
+    
+    .toast.success {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    }
+    
+    .toast.error {
+      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    }
+    
+    .status-badge {
+      animation: pulse 2s infinite;
+    }
+    
+    input:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+    }
+  </style>
+  <style>@view-transition { navigation: auto; }</style>
+ </head>
+ <body class="min-h-full">
+  <div id="app" class="min-h-full flex flex-col"></div>
+  <script>
+    const defaultConfig = {
+      background_color: "#f0f9ff",
+      surface_color: "#ffffff",
+      text_color: "#1e293b",
+      primary_action_color: "#3b82f6",
+      secondary_action_color: "#64748b",
+      font_family: "Inter",
+      font_size: 16,
+      judul_aplikasi: "Presensi Siswa SMA Negeri Mojoagung",
+      deskripsi: "Sistem presensi digital berbasis QR Code"
+    };
+
+    // Database siswa (data referensi)
+    const dataSiswa = {
+      "12345": { nama: "Ahmad Fauzi", absen: "01", kelas: "X IPA 1" },
+      "12346": { nama: "Siti Nurhaliza", absen: "02", kelas: "X IPA 1" },
+      "12347": { nama: "Budi Santoso", absen: "03", kelas: "X IPA 1" },
+      "12348": { nama: "Dewi Lestari", absen: "04", kelas: "X IPA 1" },
+      "12349": { nama: "Eko Prasetyo", absen: "05", kelas: "X IPA 1" },
+      "12350": { nama: "Fitri Handayani", absen: "01", kelas: "X IPA 2" },
+      "12351": { nama: "Gilang Ramadhan", absen: "02", kelas: "X IPA 2" },
+      "12352": { nama: "Hana Pertiwi", absen: "03", kelas: "X IPA 2" },
+      "12353": { nama: "Indra Gunawan", absen: "04", kelas: "X IPA 2" },
+      "12354": { nama: "Joko Widodo", absen: "05", kelas: "X IPA 2" },
+      "12355": { nama: "Kartika Sari", absen: "01", kelas: "XI IPA 1" },
+      "12356": { nama: "Lukman Hakim", absen: "02", kelas: "XI IPA 1" },
+      "12357": { nama: "Maya Anggraini", absen: "03", kelas: "XI IPA 1" },
+      "12358": { nama: "Nanda Pratama", absen: "04", kelas: "XI IPA 1" },
+      "12359": { nama: "Olivia Putri", absen: "05", kelas: "XI IPA 1" }
+    };
+
+    let presensiData = [];
+    let currentView = 'scan';
+    let videoStream = null;
+    let scanningActive = false;
+
+    const dataHandler = {
+      onDataChanged(data) {
+        presensiData = data;
+        if (currentView === 'riwayat') {
+          renderRiwayat();
+        }
+      }
+    };
+
+    async function onConfigChange(config) {
+      const customFont = config.font_family || defaultConfig.font_family;
+      const baseFontStack = 'system-ui, -apple-system, sans-serif';
+      const baseSize = config.font_size || defaultConfig.font_size;
+      
+      const backgroundColor = config.background_color || defaultConfig.background_color;
+      const surfaceColor = config.surface_color || defaultConfig.surface_color;
+      const textColor = config.text_color || defaultConfig.text_color;
+      const primaryColor = config.primary_action_color || defaultConfig.primary_action_color;
+      const secondaryColor = config.secondary_action_color || defaultConfig.secondary_action_color;
+      
+      document.body.style.backgroundColor = backgroundColor;
+      document.body.style.color = textColor;
+      document.body.style.fontFamily = `${customFont}, ${baseFontStack}`;
+      document.body.style.fontSize = `${baseSize}px`;
+      
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <header style="background: linear-gradient(135deg, ${primaryColor} 0%, ${adjustBrightness(primaryColor, -20)} 100%);" class="text-white p-8 shadow-2xl relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -mr-32 -mt-32"></div>
+          <div class="absolute bottom-0 left-0 w-48 h-48 bg-white opacity-5 rounded-full -ml-24 -mb-24"></div>
+          <div class="max-w-4xl mx-auto relative z-10">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="text-5xl">🎓</div>
+              <div>
+                <h1 style="font-size: ${baseSize * 1.75}px; font-family: ${customFont}, ${baseFontStack};" class="font-bold mb-1">${config.judul_aplikasi || defaultConfig.judul_aplikasi}</h1>
+                <p style="font-size: ${baseSize * 0.9}px; font-family: ${customFont}, ${baseFontStack};" class="opacity-90">${config.deskripsi || defaultConfig.deskripsi}</p>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <nav style="background-color: ${surfaceColor};" class="shadow-md sticky top-0 z-50">
+          <div class="max-w-4xl mx-auto flex gap-2 p-2">
+            <button id="btnScan" style="color: ${textColor}; font-size: ${baseSize}px; font-family: ${customFont}, ${baseFontStack};" class="flex-1 py-4 px-6 font-semibold transition-all duration-300 rounded-lg border-2" onclick="switchView('scan')">
+              <div class="flex items-center justify-center gap-2">
+                <span class="text-2xl">📷</span>
+                <span>Scan QR</span>
+              </div>
+            </button>
+            <button id="btnManual" style="color: ${textColor}; font-size: ${baseSize}px; font-family: ${customFont}, ${baseFontStack};" class="flex-1 py-4 px-6 font-semibold transition-all duration-300 rounded-lg border-2 border-transparent" onclick="switchView('manual')">
+              <div class="flex items-center justify-center gap-2">
+                <span class="text-2xl">📝</span>
+                <span>Input Manual</span>
+              </div>
+            </button>
+          </div>
+        </nav>
+
+        <main class="flex-1 p-6">
+          <div id="content" class="max-w-4xl mx-auto"></div>
+        </main>
+
+        <footer style="background: linear-gradient(135deg, ${surfaceColor} 0%, ${adjustBrightness(surfaceColor, -5)} 100%); color: ${textColor}; font-size: ${baseSize * 0.85}px; font-family: ${customFont}, ${baseFontStack};" class="text-center py-6 border-t-2 mt-8" style="border-color: ${primaryColor};">
+          <div class="max-w-4xl mx-auto">
+            <p class="font-semibold mb-1">© 2024 SMA Negeri Mojoagung</p>
+            <p class="opacity-60 text-sm">Sistem Presensi Digital</p>
+          </div>
+        </footer>
+      `;
+      
+      renderCurrentView();
+    }
+
+    function adjustBrightness(color, percent) {
+      const num = parseInt(color.replace("#",""), 16);
+      const amt = Math.round(2.55 * percent);
+      const R = (num >> 16) + amt;
+      const G = (num >> 8 & 0x00FF) + amt;
+      const B = (num & 0x0000FF) + amt;
+      return "#" + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 +
+        (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255))
+        .toString(16).slice(1);
+    }
+
+    function switchView(view) {
+      currentView = view;
+      
+      const btnScan = document.getElementById('btnScan');
+      const btnManual = document.getElementById('btnManual');
+      const config = window.elementSdk.config;
+      const primaryColor = config.primary_action_color || defaultConfig.primary_action_color;
+      const textColor = config.text_color || defaultConfig.text_color;
+      
+      if (view === 'scan') {
+        btnScan.style.borderColor = primaryColor;
+        btnScan.style.backgroundColor = primaryColor;
+        btnScan.style.color = '#ffffff';
+        btnScan.style.transform = 'scale(1.02)';
+        btnScan.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.3)';
+        btnManual.style.borderColor = 'transparent';
+        btnManual.style.backgroundColor = 'transparent';
+        btnManual.style.color = textColor;
+        btnManual.style.transform = 'scale(1)';
+        btnManual.style.boxShadow = 'none';
+        stopCamera();
+      } else if (view === 'manual') {
+        btnManual.style.borderColor = primaryColor;
+        btnManual.style.backgroundColor = primaryColor;
+        btnManual.style.color = '#ffffff';
+        btnManual.style.transform = 'scale(1.02)';
+        btnManual.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.3)';
+        btnScan.style.borderColor = 'transparent';
+        btnScan.style.backgroundColor = 'transparent';
+        btnScan.style.color = textColor;
+        btnScan.style.transform = 'scale(1)';
+        btnScan.style.boxShadow = 'none';
+        stopCamera();
+      }
+      
+      renderCurrentView();
+    }
+
+    function renderCurrentView() {
+      if (currentView === 'scan') {
+        renderScanView();
+      } else if (currentView === 'manual') {
+        renderManualView();
+      }
+      renderRiwayat();
+    }
+
+    function renderScanView() {
+      const config = window.elementSdk.config;
+      const surfaceColor = config.surface_color || defaultConfig.surface_color;
+      const textColor = config.text_color || defaultConfig.text_color;
+      const primaryColor = config.primary_action_color || defaultConfig.primary_action_color;
+      const baseSize = config.font_size || defaultConfig.font_size;
+      const customFont = config.font_family || defaultConfig.font_family;
+      const baseFontStack = 'system-ui, -apple-system, sans-serif';
+      
+      const content = document.getElementById('content');
+      content.innerHTML = `
+        <div style="background-color: ${surfaceColor};" class="rounded-2xl shadow-2xl p-8 fade-in mb-6 card-hover border-2" style="border-color: ${primaryColor}20;">
+          <div class="text-center mb-6">
+            <div class="inline-block p-4 rounded-full mb-4" style="background: linear-gradient(135deg, ${primaryColor}20, ${primaryColor}10);">
+              <div class="text-6xl">📱</div>
+            </div>
+            <h2 style="font-size: ${baseSize * 1.5}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="font-bold mb-2">Scan QR Code</h2>
+            <p style="font-size: ${baseSize}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="opacity-70">Arahkan kamera ke QR Code siswa</p>
+          </div>
+
+          <div class="mb-6 relative">
+            <video id="video" class="w-full rounded-xl shadow-lg border-4" style="display: none; max-height: 400px; background-color: #000; border-color: ${primaryColor};"></video>
+            <canvas id="canvas" style="display: none;"></canvas>
+          </div>
+
+          <button id="btnStartScan" style="background: linear-gradient(135deg, ${primaryColor} 0%, ${adjustBrightness(primaryColor, -15)} 100%); font-size: ${baseSize}px; font-family: ${customFont}, ${baseFontStack};" class="w-full text-white py-4 px-6 rounded-xl font-semibold shadow-lg btn-hover" onclick="startScanning()">
+            <div class="flex items-center justify-center gap-2">
+              <span class="text-2xl">🎥</span>
+              <span>Mulai Scan</span>
+            </div>
+          </button>
+        </div>
+        <div id="riwayatContainer"></div>
+      `;
+    }
+
+    function renderManualView() {
+      const config = window.elementSdk.config;
+      const surfaceColor = config.surface_color || defaultConfig.surface_color;
+      const textColor = config.text_color || defaultConfig.text_color;
+      const primaryColor = config.primary_action_color || defaultConfig.primary_action_color;
+      const baseSize = config.font_size || defaultConfig.font_size;
+      const customFont = config.font_family || defaultConfig.font_family;
+      const baseFontStack = 'system-ui, -apple-system, sans-serif';
+      
+      const content = document.getElementById('content');
+      content.innerHTML = `
+        <div style="background-color: ${surfaceColor};" class="rounded-2xl shadow-2xl p-8 fade-in mb-6 card-hover border-2" style="border-color: ${primaryColor}20;">
+          <div class="text-center mb-6">
+            <div class="inline-block p-4 rounded-full mb-4" style="background: linear-gradient(135deg, ${primaryColor}20, ${primaryColor}10);">
+              <div class="text-6xl">📝</div>
+            </div>
+            <h2 style="font-size: ${baseSize * 1.5}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="font-bold mb-2">Input Manual dengan NIS</h2>
+            <p style="font-size: ${baseSize}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="opacity-70">Masukkan NIS untuk presensi manual</p>
+          </div>
+
+          <form id="formManual" class="space-y-5">
+            <div>
+              <label style="font-size: ${baseSize * 0.9}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="block mb-3 font-semibold flex items-center gap-2" for="inputNIS">
+                <span class="text-xl">🔢</span>
+                <span>Nomor Induk Siswa (NIS)</span>
+              </label>
+              <input type="text" id="inputNIS" style="font-size: ${baseSize * 1.1}px; font-family: ${customFont}, ${baseFontStack}; background-color: ${surfaceColor}; color: ${textColor}; border: 2px solid ${primaryColor}40;" class="w-full px-5 py-4 rounded-xl transition-all duration-300" placeholder="Contoh: 12345" required>
+            </div>
+            
+            <div id="siswaInfo" style="display: none; background: linear-gradient(135deg, ${config.background_color || defaultConfig.background_color}, ${adjustBrightness(config.background_color || defaultConfig.background_color, 5)}); border: 3px solid ${primaryColor};" class="p-5 rounded-xl space-y-3 slide-in shadow-lg">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="text-2xl">✅</span>
+                <span style="font-size: ${baseSize * 1.1}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="font-bold">Data Siswa Ditemukan</span>
+              </div>
+              <div class="flex justify-between items-center p-3 rounded-lg" style="background-color: ${surfaceColor};">
+                <span style="font-size: ${baseSize * 0.95}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="opacity-70 flex items-center gap-2"><span>👤</span> Nama:</span>
+                <span id="infoNama" style="font-size: ${baseSize * 0.95}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="font-bold"></span>
+              </div>
+              <div class="flex justify-between items-center p-3 rounded-lg" style="background-color: ${surfaceColor};">
+                <span style="font-size: ${baseSize * 0.95}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="opacity-70 flex items-center gap-2"><span>📊</span> Absen:</span>
+                <span id="infoAbsen" style="font-size: ${baseSize * 0.95}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="font-bold"></span>
+              </div>
+              <div class="flex justify-between items-center p-3 rounded-lg" style="background-color: ${surfaceColor};">
+                <span style="font-size: ${baseSize * 0.95}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="opacity-70 flex items-center gap-2"><span>🏫</span> Kelas:</span>
+                <span id="infoKelas" style="font-size: ${baseSize * 0.95}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="font-bold"></span>
+              </div>
+              <div class="flex justify-between items-center p-3 rounded-lg" style="background-color: ${surfaceColor};">
+                <span style="font-size: ${baseSize * 0.95}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="opacity-70 flex items-center gap-2"><span>⏰</span> Waktu Login:</span>
+                <span id="infoWaktu" style="font-size: ${baseSize * 0.95}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="font-bold"></span>
+              </div>
+            </div>
+            
+            <button type="submit" id="btnSubmitManual" style="background: linear-gradient(135deg, ${config.secondary_action_color || defaultConfig.secondary_action_color} 0%, ${adjustBrightness(config.secondary_action_color || defaultConfig.secondary_action_color, -15)} 100%); font-size: ${baseSize}px; font-family: ${customFont}, ${baseFontStack}; display: none;" class="w-full text-white py-4 px-6 rounded-xl font-semibold shadow-lg btn-hover">
+              <div class="flex items-center justify-center gap-2">
+                <span class="text-2xl">✅</span>
+                <span>Simpan Presensi</span>
+              </div>
+            </button>
+          </form>
+        </div>
+        <div id="riwayatContainer"></div>
+      `;
+
+      const inputNIS = document.getElementById('inputNIS');
+      inputNIS.addEventListener('input', handleNISInput);
+      document.getElementById('formManual').addEventListener('submit', handleManualSubmit);
+    }
+
+    function handleNISInput(e) {
+      const nis = e.target.value.trim();
+      const siswaInfo = document.getElementById('siswaInfo');
+      const btnSubmit = document.getElementById('btnSubmitManual');
+      
+      if (dataSiswa[nis]) {
+        const siswa = dataSiswa[nis];
+        const now = new Date();
+        const waktuLogin = now.toLocaleTimeString('id-ID', { 
+          hour: '2-digit', 
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        
+        document.getElementById('infoNama').textContent = siswa.nama;
+        document.getElementById('infoAbsen').textContent = siswa.absen;
+        document.getElementById('infoKelas').textContent = siswa.kelas;
+        document.getElementById('infoWaktu').textContent = waktuLogin;
+        
+        siswaInfo.style.display = 'block';
+        btnSubmit.style.display = 'block';
+      } else {
+        siswaInfo.style.display = 'none';
+        btnSubmit.style.display = 'none';
+      }
+    }
+
+    async function startScanning() {
+      const video = document.getElementById('video');
+      const btnStartScan = document.getElementById('btnStartScan');
+      
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('Browser tidak mendukung akses kamera', 'error');
+        return;
+      }
+      
+      btnStartScan.disabled = true;
+      btnStartScan.innerHTML = `
+        <div class="flex items-center justify-center gap-2">
+          <span class="text-2xl">⏳</span>
+          <span>Mengaktifkan Kamera...</span>
+        </div>
+      `;
+      
+      try {
+        // Coba konfigurasi kamera secara bertahap
+        const constraints = [
+          { video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } },
+          { video: { facingMode: 'environment' } },
+          { video: { facingMode: 'user' } },
+          { video: { width: { ideal: 1280 }, height: { ideal: 720 } } },
+          { video: true }
+        ];
+        
+        let stream = null;
+        for (let constraint of constraints) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia(constraint);
+            if (stream) break;
+          } catch (err) {
+            continue;
+          }
+        }
+        
+        if (!stream) {
+          throw new Error('Kamera tidak dapat diakses');
+        }
+        
+        videoStream = stream;
+        video.srcObject = stream;
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('autoplay', 'true');
+        video.setAttribute('muted', 'true');
+        
+        await new Promise((resolve, reject) => {
+          video.onloadedmetadata = () => {
+            video.play().then(resolve).catch(reject);
+          };
+          setTimeout(() => reject(new Error('Timeout')), 10000);
+        });
+        
+        video.style.display = 'block';
+        
+        btnStartScan.innerHTML = `
+          <div class="flex items-center justify-center gap-2">
+            <span class="text-2xl">⏸️</span>
+            <span>Hentikan Scan</span>
+          </div>
+        `;
+        btnStartScan.disabled = false;
+        btnStartScan.onclick = stopCamera;
+        
+        scanningActive = true;
+        showToast('Kamera aktif! Arahkan ke QR Code', 'success');
+        requestAnimationFrame(scanQRCode);
+        
+      } catch (err) {
+        btnStartScan.disabled = false;
+        btnStartScan.innerHTML = `
+          <div class="flex items-center justify-center gap-2">
+            <span class="text-2xl">🎥</span>
+            <span>Mulai Scan</span>
+          </div>
+        `;
+        
+        showToast('Kamera tidak dapat diakses. Gunakan input manual sebagai alternatif.', 'error');
+      }
+    }
+
+    function stopCamera() {
+      scanningActive = false;
+      const video = document.getElementById('video');
+      const btnStartScan = document.getElementById('btnStartScan');
+      
+      if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+        videoStream = null;
+      }
+      
+      if (video) {
+        video.style.display = 'none';
+      }
+      
+      if (btnStartScan) {
+        btnStartScan.innerHTML = `
+          <div class="flex items-center justify-center gap-2">
+            <span class="text-2xl">🎥</span>
+            <span>Mulai Scan</span>
+          </div>
+        `;
+        btnStartScan.onclick = startScanning;
+      }
+    }
+
+    function scanQRCode() {
+      if (!scanningActive) return;
+      
+      const video = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      const context = canvas.getContext('2d');
+      
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
+        
+        if (code) {
+          processQRCode(code.data);
+          return;
+        }
+      }
+      
+      requestAnimationFrame(scanQRCode);
+    }
+
+    async function processQRCode(data) {
+      stopCamera();
+      
+      try {
+        const qrData = JSON.parse(data);
+        
+        if (qrData.nis && dataSiswa[qrData.nis]) {
+          const siswa = dataSiswa[qrData.nis];
+          await savePresensi(qrData.nis, siswa.nama, siswa.absen, siswa.kelas);
+        } else {
+          showToast('NIS tidak ditemukan dalam database', 'error');
+        }
+      } catch (err) {
+        showToast('QR Code tidak dapat dibaca', 'error');
+      }
+    }
+
+    async function handleManualSubmit(e) {
+      e.preventDefault();
+      
+      const btnSubmit = document.getElementById('btnSubmitManual');
+      btnSubmit.disabled = true;
+      btnSubmit.innerHTML = `
+        <div class="flex items-center justify-center gap-2">
+          <span class="text-2xl">⏳</span>
+          <span>Menyimpan...</span>
+        </div>
+      `;
+      
+      const nis = document.getElementById('inputNIS').value.trim();
+      
+      if (dataSiswa[nis]) {
+        const siswa = dataSiswa[nis];
+        await savePresensi(nis, siswa.nama, siswa.absen, siswa.kelas);
+        
+        document.getElementById('inputNIS').value = '';
+        document.getElementById('siswaInfo').style.display = 'none';
+        btnSubmit.style.display = 'none';
+      } else {
+        showToast('NIS tidak ditemukan', 'error');
+      }
+      
+      btnSubmit.disabled = false;
+      btnSubmit.innerHTML = `
+        <div class="flex items-center justify-center gap-2">
+          <span class="text-2xl">✅</span>
+          <span>Simpan Presensi</span>
+        </div>
+      `;
+    }
+
+    async function savePresensi(nis, nama, absen, kelas) {
+      if (presensiData.length >= 999) {
+        showToast('Batas maksimum 999 data presensi tercapai. Hapus beberapa data terlebih dahulu.', 'error');
+        return;
+      }
+      
+      const now = new Date();
+      const jamSekarang = now.getHours();
+      const menitSekarang = now.getMinutes();
+      
+      const isTerlambat = (jamSekarang > 6) || (jamSekarang === 6 && menitSekarang > 50);
+      const status = isTerlambat ? 'Terlambat' : 'Hadir';
+      
+      const presensiRecord = {
+        id: `presensi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        nis: nis,
+        nama_siswa: nama,
+        absen: absen,
+        kelas: kelas,
+        waktu_presensi: now.toISOString(),
+        status: status
+      };
+      
+      const result = await window.dataSdk.create(presensiRecord);
+      
+      if (result.isOk) {
+        if (isTerlambat) {
+          showToast(`${nama} terlambat! Presensi disimpan.`, 'error');
+        } else {
+          showToast(`Presensi ${nama} berhasil disimpan!`, 'success');
+        }
+      } else {
+        showToast('Gagal menyimpan presensi. Silakan coba lagi.', 'error');
+      }
+    }
+
+    function renderRiwayat() {
+      const config = window.elementSdk.config;
+      const surfaceColor = config.surface_color || defaultConfig.surface_color;
+      const textColor = config.text_color || defaultConfig.text_color;
+      const primaryColor = config.primary_action_color || defaultConfig.primary_action_color;
+      const secondaryColor = config.secondary_action_color || defaultConfig.secondary_action_color;
+      const baseSize = config.font_size || defaultConfig.font_size;
+      const customFont = config.font_family || defaultConfig.font_family;
+      const baseFontStack = 'system-ui, -apple-system, sans-serif';
+      
+      const riwayatContainer = document.getElementById('riwayatContainer');
+      if (!riwayatContainer) return;
+      
+      const sortedData = [...presensiData].sort((a, b) => 
+        new Date(b.waktu_presensi) - new Date(a.waktu_presensi)
+      );
+      
+      let html = `
+        <div style="background-color: ${surfaceColor};" class="rounded-2xl shadow-2xl p-6 fade-in border-2" style="border-color: ${primaryColor}20;">
+          <div class="flex justify-between items-center mb-6 pb-4 border-b-2" style="border-color: ${primaryColor}20;">
+            <div>
+              <div class="flex items-center gap-3 mb-2">
+                <span class="text-3xl">📋</span>
+                <h2 style="font-size: ${baseSize * 1.5}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="font-bold">Riwayat Presensi</h2>
+              </div>
+              <div class="flex items-center gap-2">
+                <span style="font-size: ${baseSize * 0.9}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack}; background-color: ${primaryColor};" class="px-3 py-1 rounded-full text-white font-semibold">
+                  ${presensiData.length} Data
+                </span>
+                <span style="font-size: ${baseSize * 0.85}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="opacity-60">Presensi tersimpan</span>
+              </div>
+            </div>
+          </div>
+      `;
+      
+      if (sortedData.length === 0) {
+        html += `
+          <div class="text-center py-16">
+            <div class="inline-block p-6 rounded-full mb-4" style="background: linear-gradient(135deg, ${primaryColor}15, ${primaryColor}05);">
+              <div class="text-7xl">📭</div>
+            </div>
+            <p style="font-size: ${baseSize * 1.1}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="font-semibold mb-2">Belum Ada Data Presensi</p>
+            <p style="font-size: ${baseSize * 0.9}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="opacity-60">Mulai scan QR atau input manual untuk menambah data</p>
+          </div>
+        `;
+      } else {
+        html += '<div class="space-y-4">';
+        
+        sortedData.forEach(item => {
+          const waktu = new Date(item.waktu_presensi);
+          const tanggal = waktu.toLocaleDateString('id-ID', { 
+            day: 'numeric', 
+            month: 'long', 
+            year: 'numeric' 
+          });
+          const jam = waktu.toLocaleTimeString('id-ID', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            second: '2-digit'
+          });
+          
+          const isTerlambat = item.status === 'Terlambat';
+          const namaColor = isTerlambat ? '#ef4444' : textColor;
+          const borderColor = isTerlambat ? '#ef4444' : primaryColor;
+          const statusBadgeColor = isTerlambat ? '#ef4444' : '#10b981';
+          
+          html += `
+            <div data-id="${item.id}" style="background: linear-gradient(135deg, ${config.background_color || defaultConfig.background_color}, ${adjustBrightness(config.background_color || defaultConfig.background_color, 3)}); border-left: 5px solid ${borderColor};" class="p-5 rounded-xl card-hover shadow-md slide-in border" style="border-color: ${borderColor}20;">
+              <div class="flex justify-between items-start gap-4">
+                <div class="flex-1">
+                  <div class="flex items-center gap-3 mb-3 flex-wrap">
+                    <h3 style="font-size: ${baseSize * 1.15}px; color: ${namaColor}; font-family: ${customFont}, ${baseFontStack};" class="font-bold flex items-center gap-2">
+                      <span class="text-xl">👤</span>
+                      ${item.nama_siswa}
+                    </h3>
+                    <span style="font-size: ${baseSize * 0.8}px; color: white; background: linear-gradient(135deg, ${primaryColor}, ${adjustBrightness(primaryColor, -15)});" class="px-3 py-1 rounded-full font-semibold shadow-sm">
+                      NIS: ${item.nis}
+                    </span>
+                    <span style="font-size: ${baseSize * 0.75}px; background: linear-gradient(135deg, ${statusBadgeColor}, ${adjustBrightness(statusBadgeColor, -15)});" class="px-3 py-1 rounded-full text-white font-bold shadow-sm status-badge">
+                      ${item.status}
+                    </span>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3 mb-3">
+                    <div class="flex items-center gap-2 p-2 rounded-lg" style="background-color: ${surfaceColor}40;">
+                      <span class="text-lg">📊</span>
+                      <div>
+                        <p style="font-size: ${baseSize * 0.75}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="opacity-60">Absen</p>
+                        <p style="font-size: ${baseSize * 0.9}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="font-bold">${item.absen}</p>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-2 p-2 rounded-lg" style="background-color: ${surfaceColor}40;">
+                      <span class="text-lg">🏫</span>
+                      <div>
+                        <p style="font-size: ${baseSize * 0.75}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="opacity-60">Kelas</p>
+                        <p style="font-size: ${baseSize * 0.9}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack};" class="font-bold">${item.kelas}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-4 flex-wrap">
+                    <span style="font-size: ${baseSize * 0.85}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack}; background-color: ${surfaceColor};" class="opacity-80 px-3 py-1 rounded-lg flex items-center gap-2">
+                      <span>📅</span>
+                      ${tanggal}
+                    </span>
+                    <span style="font-size: ${baseSize * 0.85}px; color: ${textColor}; font-family: ${customFont}, ${baseFontStack}; background-color: ${surfaceColor};" class="opacity-80 px-3 py-1 rounded-lg flex items-center gap-2">
+                      <span>🕐</span>
+                      ${jam}
+                    </span>
+                  </div>
+                </div>
+                <button onclick="deletePresensi('${item.id}')" style="background: linear-gradient(135deg, ${secondaryColor}, ${adjustBrightness(secondaryColor, -15)}); font-size: ${baseSize * 0.85}px; font-family: ${customFont}, ${baseFontStack};" class="text-white px-4 py-3 rounded-xl hover:opacity-90 transition-all shadow-md btn-hover flex-shrink-0">
+                  <div class="flex items-center gap-1">
+                    <span>🗑️</span>
+                    <span>Hapus</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+          `;
+        });
+        
+        html += '</div>';
+      }
+      
+      html += '</div>';
+      riwayatContainer.innerHTML = html;
+    }
+
+    async function deletePresensi(id) {
+      const record = presensiData.find(item => item.id === id);
+      if (!record) return;
+      
+      const element = document.querySelector(`[data-id="${id}"]`);
+      if (element) {
+        const button = element.querySelector('button');
+        button.disabled = true;
+        button.innerHTML = `
+          <div class="flex items-center gap-1">
+            <span>⏳</span>
+            <span>Menghapus...</span>
+          </div>
+        `;
+      }
+      
+      const result = await window.dataSdk.delete(record);
+      
+      if (result.isOk) {
+        showToast('Data presensi berhasil dihapus', 'success');
+      } else {
+        showToast('Gagal menghapus data. Silakan coba lagi.', 'error');
+        if (element) {
+          const button = element.querySelector('button');
+          button.disabled = false;
+          button.innerHTML = `
+            <div class="flex items-center gap-1">
+              <span>🗑️</span>
+              <span>Hapus</span>
+            </div>
+          `;
+        }
+      }
+    }
+
+    function showToast(message, type) {
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      
+      setTimeout(() => {
+        toast.remove();
+      }, 3000);
+    }
+
+    async function init() {
+      await window.dataSdk.init(dataHandler);
+      
+      await window.elementSdk.init({
+        defaultConfig,
+        onConfigChange,
+        mapToCapabilities: (config) => ({
+          recolorables: [
+            {
+              get: () => config.background_color || defaultConfig.background_color,
+              set: (value) => {
+                config.background_color = value;
+                window.elementSdk.setConfig({ background_color: value });
+              }
+            },
+            {
+              get: () => config.surface_color || defaultConfig.surface_color,
+              set: (value) => {
+                config.surface_color = value;
+                window.elementSdk.setConfig({ surface_color: value });
+              }
+            },
+            {
+              get: () => config.text_color || defaultConfig.text_color,
+              set: (value) => {
+                config.text_color = value;
+                window.elementSdk.setConfig({ text_color: value });
+              }
+            },
+            {
+              get: () => config.primary_action_color || defaultConfig.primary_action_color,
+              set: (value) => {
+                config.primary_action_color = value;
+                window.elementSdk.setConfig({ primary_action_color: value });
+              }
+            },
+            {
+              get: () => config.secondary_action_color || defaultConfig.secondary_action_color,
+              set: (value) => {
+                config.secondary_action_color = value;
+                window.elementSdk.setConfig({ secondary_action_color: value });
+              }
+            }
+          ],
+          borderables: [],
+          fontEditable: {
+            get: () => config.font_family || defaultConfig.font_family,
+            set: (value) => {
+              config.font_family = value;
+              window.elementSdk.setConfig({ font_family: value });
+            }
+          },
+          fontSizeable: {
+            get: () => config.font_size || defaultConfig.font_size,
+            set: (value) => {
+              config.font_size = value;
+              window.elementSdk.setConfig({ font_size: value });
+            }
+          }
+        }),
+        mapToEditPanelValues: (config) => new Map([
+          ["judul_aplikasi", config.judul_aplikasi || defaultConfig.judul_aplikasi],
+          ["deskripsi", config.deskripsi || defaultConfig.deskripsi]
+        ])
+      });
+    }
+
+    init();
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9a18739367437082',t:'MTc2MzY0Njk5NC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
